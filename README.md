@@ -1,1 +1,1 @@
-# -HSE.ModernOperationsResearchMethods.BranchAndBound
+# HSE.ModernOperationsResearchMethods.BranchAndBound
