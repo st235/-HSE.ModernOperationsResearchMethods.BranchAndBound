@@ -28,6 +28,33 @@ int32_t GenerateInRange(int32_t start, int32_t finish) {
     return static_cast<int32_t>(std::rand() % width + start);
 }
 
+template<typename T>
+std::string ConvertToString(
+        const std::unordered_set<T>& collection,
+        const std::string& delimiter = " ") {
+    std::ostringstream os;
+    int32_t i = 0;
+    for (const auto& item: collection) {
+        if (i > 0) {
+            os << delimiter;
+        }
+        os << item;
+        i++;
+    }
+    return os.str();
+}
+
+template<typename Callback>
+double MeasureTime(Callback callback) {
+    clock_t start = clock();
+
+    callback();
+
+    clock_t end = clock();
+    clock_t ticks_diff = end - start;
+    return RoundTo(double(ticks_diff) / CLOCKS_PER_SEC, 0.001);
+}
+
 } // namespace
 
 namespace std {
@@ -1122,11 +1149,13 @@ public:
     MaxCliqueBranchAndBoundSearch(MaxCliqueBranchAndBoundSearch&& that) = default;
     MaxCliqueBranchAndBoundSearch& operator=(MaxCliqueBranchAndBoundSearch&& that) = default;
 
-    void RunSearch() {
+    void RunInitialHeuristic() {
         taboo_search::MaxCliqueTabuSearch taboo_search(graph_);
         taboo_search.RunSearch();
         best_clique_ = taboo_search.GetClique();
+    }
 
+    void RunSearch() {
         const auto& vertices = graph_->GetVertices();
 
         std::unordered_set<int32_t> clique;
@@ -1227,36 +1256,43 @@ int main() {
     };
 
     std::ofstream fout("clique_bnb.csv");
-    fout << "File; Clique; Time (sec)\n";
+    fout << "File; Clique; Heuristic time, sec; BnB time, sec; Clique size; Clique vertices" << std::endl;
 
     std::cout << std::setfill(' ') << std::setw(20) << "Instance"
               << std::setfill(' ') << std::setw(10) << "Clique"
-              << std::setfill(' ') << std::setw(15) << "Time, sec"
+              << std::setfill(' ') << std::setw(35) << "Heuristic + BnB time, sec"
               << std::endl;
 
     for (const auto& file: files) {
         std::shared_ptr<graph::Graph> graph = graph::Graph::ReadGraphFile("data/" + file);
         MaxCliqueBranchAndBoundSearch problem(graph);
 
-        clock_t start = clock();
+        double heuristic_time = MeasureTime([&problem]() {
+            problem.RunInitialHeuristic();
+        });
 
-        problem.RunSearch();
+        double search_time = MeasureTime([&problem]() {
+            problem.RunSearch();
+        });
+
+        double overall_time = heuristic_time + search_time;
         const auto& best_clique = problem.GetClique();
-
-        clock_t end = clock();
-        clock_t ticks_diff = end - start;
-        double seconds_diff = RoundTo(double(ticks_diff) / CLOCKS_PER_SEC, 0.001);
 
         if (!graph::IsValidClique(*graph, best_clique)) {
             std::cout << "*** WARNING: incorrect clique ***\n";
             fout << "*** WARNING: incorrect clique ***\n";
         }
 
-        fout << file << "; " << best_clique.size() << "; " << double(clock() - start) / CLOCKS_PER_SEC << '\n';
+        fout << file << "; "
+             << heuristic_time << "; "
+             << search_time << "; "
+             << best_clique.size() << "; "
+             << ConvertToString(best_clique, ", ")
+             << std::endl;
 
         std::cout << std::setfill(' ') << std::setw(20) << file
                   << std::setfill(' ') << std::setw(10) << best_clique.size()
-                  << std::setfill(' ') << std::setw(15) << seconds_diff
+                  << std::setfill(' ') << std::setw(35) << overall_time
                   << std::endl;
     }
 
