@@ -2,6 +2,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 #include <sstream>
 #include <time.h>
@@ -374,9 +375,7 @@ public:
     explicit Graph(const std::unordered_set<int32_t>& vertices):
             vertices_(vertices.begin(), vertices.end()),
             adjacency_list_() {
-        for (const auto& v: vertices) {
-            adjacency_list_[v] = {};
-        }
+        // empty on purpose
     }
     Graph(const Graph& that) = default;
     Graph& operator=(const Graph& that) = default;
@@ -433,35 +432,17 @@ public:
         return sub_graph;
     }
 
-    [[nodiscard]] std::vector<std::tuple<int32_t, uint32_t>> SortByDegree() const {
-        std::vector<std::tuple<int32_t, uint32_t>> result;
+    [[nodiscard]] std::unordered_map<int32_t, int32_t> GetVerticesDegree() const {
+        std::unordered_map<int32_t, int32_t> result;
 
         for (const auto& i: vertices_) {
-            uint32_t degree = 0;
-
-            for (const auto& j: vertices_) {
-                if (i == j) {
-                    continue;
-                }
-
-                if (HasEdge(i, j)) {
-                    degree += 1;
-                }
-            }
-
-            result.emplace_back(i, degree);
+            result[i] = GetAdjacentVertices(i).size();
         }
-
-        std::sort(result.begin(), result.end(), [](const std::tuple<int32_t, uint32_t>& one,
-                                                   const std::pair<int32_t, uint32_t>& another) {
-            return std::tie(std::get<1>(one), std::get<0>(one)) >
-                   std::tie(std::get<1>(another), std::get<0>(another));
-        });
 
         return result;
     }
 
-    [[nodiscard]] std::vector<std::tuple<int32_t, int32_t, int32_t>> SortByColor() const {
+    [[nodiscard]] std::unordered_map<int32_t, int32_t> GetVerticesColoring() const {
         std::set<SaturationNode, SaturationComparator> queue;
 
         std::unordered_map<int32_t, uint32_t> vertices_degrees;
@@ -476,7 +457,7 @@ public:
             colors[i] = -1;
             vertices_degrees[i] = adjacent_vertices.size();
 
-            queue.insert(SaturationNode(static_cast<uint32_t>(i),
+            queue.insert(SaturationNode(i,
                                         static_cast<uint32_t>(adjacent_colors[i].size()),
                                         vertices_degrees[i]));
         }
@@ -508,7 +489,7 @@ public:
                     continue;
                 }
 
-                SaturationNode old_neighbour_state(static_cast<uint32_t>(neighbour),
+                SaturationNode old_neighbour_state(neighbour,
                                                    static_cast<uint32_t>(adjacent_colors[neighbour].size()),
                                                    vertices_degrees[neighbour]);
 
@@ -520,7 +501,7 @@ public:
                 vertices_degrees[neighbour] -= 1;
                 queue.erase(old_neighbour_state);
 
-                SaturationNode new_neighbour_state(static_cast<uint32_t>(neighbour),
+                SaturationNode new_neighbour_state(neighbour,
                                                    static_cast<uint32_t>(adjacent_colors[neighbour].size()),
                                                    vertices_degrees[neighbour]);
 
@@ -528,24 +509,13 @@ public:
             }
         }
 
-        std::vector<std::tuple<int32_t, int32_t, int32_t>> result;
-
-        for (const auto& v: vertices_) {
-            const auto& neighbours = GetAdjacentVertices(v);
-            result.emplace_back(v, colors[v], GetDegree(v));
-        }
-
-        std::sort(result.begin(), result.end(), [](const std::tuple<int32_t, int32_t, int32_t>& one,
-                                                   const std::tuple<int32_t, int32_t, int32_t>& another) {
-            return std::tie(std::get<1>(one), std::get<2>(one), std::get<0>(one)) >
-                   std::tie(std::get<1>(another), std::get<2>(another), std::get<0>(another));
-        });
-
-        return result;
+        return colors;
     }
 
-    [[nodiscard]] std::vector<std::tuple<int32_t, uint32_t>> SortByPardalos() const {
-        std::vector<std::tuple<int32_t, uint32_t>> result;
+    [[nodiscard]] std::unordered_map<int32_t, int32_t> GetVerticesPardalosWeights() const {
+        std::unordered_map<int32_t, int32_t> result;
+
+        int32_t pardalos_weight_factory = 0;
 
         std::unordered_map<int32_t, uint32_t> degrees;
         std::set<PardalosNode, PardalosDegreeComparator> queue;
@@ -557,13 +527,19 @@ public:
 
         while (!queue.empty()) {
             const auto& iterator = queue.begin();
-            const auto& node = *iterator;
+            PardalosNode node = *iterator;
             queue.erase(node);
 
-            result.emplace_back(node.id, node.degree);
+            result[node.id] = pardalos_weight_factory;
+            pardalos_weight_factory += 1;
 
             for (const auto& neighbour: GetAdjacentVertices(node.id)) {
                 PardalosNode old_state(neighbour, degrees[neighbour]);
+
+                if (queue.find(old_state) == queue.end()) {
+                    continue;
+                }
+
                 queue.erase(old_state);
                 degrees[neighbour] -= 1;
                 queue.emplace(neighbour, degrees[neighbour]);
@@ -967,8 +943,8 @@ public:
     ~Clique() = default;
 };
 
-bool VerifyClique(const Graph& graph,
-                  const std::vector<int32_t>& clique) {
+bool IsValidClique(const Graph& graph,
+                   const std::unordered_set<int32_t>& clique) {
     for (int i: clique) {
         for (int j: clique) {
             if (i != j && !graph.HasEdge(i, j)) {
@@ -1029,13 +1005,13 @@ private:
     }
 
     void RunInitialHeuristic(graph::Clique& clique) {
-        const auto& colored_vertices = graph_->SortByColor();
+        const auto& colored_vertices = graph_->GetVerticesColoring();
 
         std::unordered_map<int32_t, int32_t> graph_coloring;
 
         for (const auto& vertex: colored_vertices) {
-            const auto& node = std::get<0>(vertex);
-            const auto& color = std::get<1>(vertex);
+            const auto& node = vertex.first;
+            const auto& color = vertex.second;
             graph_coloring[node] = color;
         }
 
@@ -1094,7 +1070,7 @@ private:
 
 public:
     explicit MaxCliqueTabuSearch(std::shared_ptr<graph::Graph> graph):
-        graph_(graph) {
+        graph_(std::move(graph)) {
         // empty on purpose
     }
 
@@ -1134,98 +1110,120 @@ public:
 
 } // namespace taboo_search
 
-class BnBSolver {
+class MaxCliqueBranchAndBoundSearch {
 public:
-    void RunBnB() {
-        taboo_search::MaxCliqueTabuSearch st(graph_);
-//        st.ReadGraphFile(file);
-//        st.RunSearch();
-        best_clique = st.GetClique();
-        vector<int> candidates(neighbours.size());
-        for (size_t i = 0; i < neighbours.size(); ++i) {
-            candidates[i] = i;
-        }
-        static mt19937 generator;
-        shuffle(candidates.begin(), candidates.end(), generator);
-        BnBRecursion(candidates);
+    explicit MaxCliqueBranchAndBoundSearch(std::shared_ptr<graph::Graph> graph):
+        graph_(std::move(graph)) {
+        // empty on purpose
     }
 
-    const unordered_set<int> &GetClique() {
-        return best_clique;
+    MaxCliqueBranchAndBoundSearch(const MaxCliqueBranchAndBoundSearch& that) = default;
+    MaxCliqueBranchAndBoundSearch& operator=(const MaxCliqueBranchAndBoundSearch& that) = default;
+    MaxCliqueBranchAndBoundSearch(MaxCliqueBranchAndBoundSearch&& that) = default;
+    MaxCliqueBranchAndBoundSearch& operator=(MaxCliqueBranchAndBoundSearch&& that) = default;
+
+    void RunSearch() {
+        taboo_search::MaxCliqueTabuSearch taboo_search(graph_);
+        taboo_search.RunSearch();
+        best_clique_ = taboo_search.GetClique();
+
+        const auto& vertices = graph_->GetVertices();
+
+        std::unordered_set<int32_t> clique;
+        std::unordered_set<int32_t> candidates(vertices.begin(), vertices.end());
+
+        const auto& pardalos_weights = graph_->GetVerticesPardalosWeights();
+
+        BrandAndBoundRecursion(pardalos_weights, candidates, clique);
     }
 
-    bool Check() {
-        for (int i: clique) {
-            for (int j: clique) {
-                if (i != j && neighbours[i].count(j) == 0) {
-                    cout << "Returned subgraph is not clique\n";
-                    return false;
-                }
-            }
-        }
-        return true;
+    const unordered_set<int32_t>& GetClique() {
+        return best_clique_;
     }
 
-    void ClearClique() {
-        best_clique.clear();
-        clique.clear();
-    }
+    ~MaxCliqueBranchAndBoundSearch() = default;
 
 private:
-    void BnBRecursion(const vector<int> &candidates) {
-        if (candidates.empty()) {
-            if (clique.size() > best_clique.size()) {
-                best_clique = clique;
+    void BrandAndBoundRecursion(
+            const std::unordered_map<int32_t, int32_t>& pardalos_weights,
+            std::unordered_set<int32_t>& vertices,
+            std::unordered_set<int32_t>& clique) {
+        if (vertices.empty()) {
+            if (clique.size() > best_clique_.size()) {
+                best_clique_ = clique;
             }
+
             return;
         }
 
-        if (clique.size() + candidates.size() <= best_clique.size())
+        if (clique.size() + vertices.size() <= best_clique_.size()) {
             return;
+        }
 
-        for (size_t c = 0; c < candidates.size(); ++c) {
-            vector<int> new_candidates;
-            new_candidates.reserve(candidates.size());
-            for (size_t i = c + 1; i < candidates.size(); ++i) {
-                if (neighbours[candidates[c]].count(candidates[i]) != 0)
-                    new_candidates.push_back(candidates[i]);
+        const auto& subgraph = graph_->MakeSubgraphFrom(vertices);
+        const auto& coloring = subgraph.GetVerticesColoring();
+
+        // id, color, pardalos_weight
+        std::vector<std::tuple<int32_t, int32_t, int32_t>> sorted_vertices;
+        for (const auto& coloring_entry: coloring) {
+            const auto& node = coloring_entry.first;
+            sorted_vertices.emplace_back(
+                    node, coloring_entry.second, pardalos_weights.at(node));
+        }
+
+        std::sort(sorted_vertices.begin(), sorted_vertices.end(), [](
+                const std::tuple<int32_t, int32_t, int32_t>& one, const std::tuple<int32_t, int32_t, int32_t>& another) {
+           return std::tie(std::get<1>(one), std::get<2>(one))
+                > std::tie(std::get<1>(another), std::get<2>(another));
+        });
+
+        int32_t max_color = std::get<1>(sorted_vertices[0]);
+        // Color is indexed from 0.
+        int32_t max_possible_clique = max_color + 1;
+
+        if (clique.size() + max_possible_clique <= best_clique_.size()) {
+            return;
+        }
+
+        for (const auto& next_clique_vertex: sorted_vertices) {
+            int32_t node_id = std::get<0>(next_clique_vertex);
+
+            std::unordered_set<int32_t> new_vertices;
+
+            vertices.erase(node_id);
+            clique.insert(node_id);
+
+            for (const auto& vertex: vertices) {
+                if (subgraph.HasEdge(node_id, vertex)) {
+                    new_vertices.insert(vertex);
+                }
             }
-            clique.insert(candidates[c]);
-            BnBRecursion(new_candidates);
-            clique.erase(candidates[c]);
+
+            BrandAndBoundRecursion(pardalos_weights, new_vertices, clique);
+
+            clique.erase(node_id);
         }
     }
 
 private:
     std::shared_ptr<graph::Graph> graph_;
-
-    vector <unordered_set<int>> neighbours;
-    unordered_set<int> best_clique;
-    unordered_set<int> clique;
-    string file;
+    std::unordered_set<int32_t> best_clique_;
 };
 
 int main() {
-//    vector <string> files = { /*"C125.9.clq",*/ "johnson8-2-4.clq", "johnson16-2-4.clq", "MANN_a9.clq", /*"MANN_a27.clq",
-//        "p_hat1000-1.clq",*/ "keller4.clq", "hamming8-4.clq", /*"brock200_1.clq",*/ "brock200_2.clq", "brock200_3.clq",
-//                                                "brock200_4.clq",
-//            /*"gen200_p0.9_44.clq", "gen200_p0.9_55.clq", "brock400_1.clq", "brock400_2.clq", "brock400_3.clq", "brock400_4.clq",
-//            "MANN_a45.clq", "sanr400_0.7.clq", "p_hat1000-2.clq", "p_hat500-3.clq", "p_hat1500-1.clq", "p_hat300-3.clq", "san1000.clq",
-//            "sanr200_0.9.clq"*/ };
-
-    std::vector<std::string> files = { "brock200_1.clq", "brock200_2.clq", "brock200_3.clq", "brock200_4.clq",
-                                       "brock400_1.clq", "brock400_2.clq", "brock400_3.clq", "brock400_4.clq",
-                                       "C125.9.clq",
-                                       "gen200_p0.9_44.clq", "gen200_p0.9_55.clq",
-                                       "hamming8-4.clq",
+    std::vector<std::string> files = { /* "brock200_1.clq", */ "brock200_2.clq", "brock200_3.clq", "brock200_4.clq",
+                                       // "brock400_1.clq", "brock400_2.clq", "brock400_3.clq", "brock400_4.clq",
+                                       // "C125.9.clq",
+                                       // "gen200_p0.9_44.clq", "gen200_p0.9_55.clq",
+                                        "hamming8-4.clq",
                                        "johnson16-2-4.clq", "johnson8-2-4.clq",
-                                       "keller4.clq",
-                                       "MANN_a27.clq", "MANN_a9.clq",
-                                       "p_hat1000-1.clq", "p_hat1000-2.clq",
-                                       "p_hat1500-1.clq",
-                                       "p_hat300-3.clq", "p_hat500-3.clq",
-                                       "san1000.clq",
-                                       "sanr200_0.9.clq", "sanr400_0.7.clq"
+                                        "keller4.clq",
+                                       /* "MANN_a27.clq", */ "MANN_a9.clq",
+                                       //"p_hat1000-1.clq", "p_hat1000-2.clq",
+                                       // "p_hat1500-1.clq",
+                                       //"p_hat300-3.clq", "p_hat500-3.clq",
+                                       // "san1000.clq",
+                                       // "sanr200_0.9.clq", "sanr400_0.7.clq"
     };
 
     std::ofstream fout("clique_bnb.csv");
@@ -1238,24 +1236,26 @@ int main() {
 
     for (const auto& file: files) {
         std::shared_ptr<graph::Graph> graph = graph::Graph::ReadGraphFile("data/" + file);
-        taboo_search::MaxCliqueTabuSearch problem(graph);
-        problem.RunSearch();
-//        problem.ReadGraphFile("data/" + file);
-//        problem.ClearClique();
+        MaxCliqueBranchAndBoundSearch problem(graph);
+
         clock_t start = clock();
-//        problem.RunBnB();
-//        if (!problem.Check()) {
-//            cout << "*** WARNING: incorrect clique ***\n";
-//            fout << "*** WARNING: incorrect clique ***\n";
-//        }
+
+        problem.RunSearch();
+        const auto& best_clique = problem.GetClique();
+
         clock_t end = clock();
         clock_t ticks_diff = end - start;
         double seconds_diff = RoundTo(double(ticks_diff) / CLOCKS_PER_SEC, 0.001);
 
-        fout << file << "; " << problem.GetClique().size() << "; " << double(clock() - start) / CLOCKS_PER_SEC << '\n';
+        if (!graph::IsValidClique(*graph, best_clique)) {
+            cout << "*** WARNING: incorrect clique ***\n";
+            fout << "*** WARNING: incorrect clique ***\n";
+        }
+
+        fout << file << "; " << best_clique.size() << "; " << double(clock() - start) / CLOCKS_PER_SEC << '\n';
 
         std::cout << std::setfill(' ') << std::setw(20) << file
-                  << std::setfill(' ') << std::setw(10) << problem.GetClique().size()
+                  << std::setfill(' ') << std::setw(10) << best_clique.size()
                   << std::setfill(' ') << std::setw(15) << seconds_diff
                   << std::endl;
     }
