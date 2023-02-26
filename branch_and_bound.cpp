@@ -277,7 +277,7 @@ public:
     uint32_t saturation;
     uint32_t uncolored_neighborhood_degree;
 
-    SaturationNode(uint32_t id, uint32_t saturation, uint32_t uncolored_neighborhood_degree):
+    SaturationNode(int32_t id, uint32_t saturation, uint32_t uncolored_neighborhood_degree):
             id(id),
             saturation(saturation),
             uncolored_neighborhood_degree(uncolored_neighborhood_degree) {
@@ -286,6 +286,8 @@ public:
 
     SaturationNode(const SaturationNode& that) = default;
     SaturationNode& operator=(const SaturationNode& that) = default;
+    SaturationNode(SaturationNode&& that) = default;
+    SaturationNode& operator=(SaturationNode&& that) = default;
 
     ~SaturationNode() = default;
 };
@@ -294,6 +296,32 @@ struct SaturationComparator {
     bool operator()(const SaturationNode& lhs, const SaturationNode& rhs) const {
         return std::tie(lhs.saturation, lhs.uncolored_neighborhood_degree, lhs.id) >
                std::tie(rhs.saturation, rhs.uncolored_neighborhood_degree, rhs.id);
+    }
+};
+
+struct PardalosNode {
+public:
+    int32_t id;
+    uint32_t degree;
+
+    PardalosNode(int32_t id, uint32_t degree):
+        id(id),
+        degree(degree) {
+        // empty on purpose
+    }
+
+    PardalosNode(const PardalosNode& that) = default;
+    PardalosNode& operator=(const PardalosNode& that) = default;
+    PardalosNode(PardalosNode&& that) = default;
+    PardalosNode& operator=(PardalosNode&& that) = default;
+
+    ~PardalosNode() = default;
+};
+
+struct PardalosDegreeComparator {
+    bool operator()(const PardalosNode& lhs, const PardalosNode& rhs) const {
+        return std::tie(lhs.degree, lhs.id) <
+               std::tie(rhs.degree, rhs.id);
     }
 };
 
@@ -352,6 +380,8 @@ public:
     }
     Graph(const Graph& that) = default;
     Graph& operator=(const Graph& that) = default;
+    Graph(Graph&& that) = default;
+    Graph& operator=(Graph&& that) = default;
 
     void AddEdge(int32_t from, int32_t to) {
         if (adjacency_list_.find(from) == adjacency_list_.end()) {
@@ -369,11 +399,25 @@ public:
     }
 
     void RemoveEdge(int32_t from, int32_t to) {
+        assert(vertices_.find(from) != vertices_.end());
+        assert(vertices_.find(to) != vertices_.end());
+
         adjacency_list_[from].erase(to);
         adjacency_list_[to].erase(from);
     }
 
-    [[nodiscard]] Graph MakeSubgraph(const std::unordered_set<int32_t>& vertices) const {
+    void RemoveVertex(int32_t vertex) {
+        assert(vertices_.find(vertex) != vertices_.end());
+
+        for (const auto& neighbour: GetAdjacentVertices(vertex)) {
+            adjacency_list_[neighbour].erase(vertex);
+        }
+
+        vertices_.erase(vertex);
+        adjacency_list_.erase(vertex);
+    }
+
+    [[nodiscard]] Graph MakeSubgraphFrom(const std::unordered_set<int32_t>& vertices) const {
         Graph sub_graph(vertices);
 
         for (const auto& v: vertices) {
@@ -500,6 +544,35 @@ public:
         return result;
     }
 
+    [[nodiscard]] std::vector<std::tuple<int32_t, uint32_t>> SortByPardalos() const {
+        std::vector<std::tuple<int32_t, uint32_t>> result;
+
+        std::unordered_map<int32_t, uint32_t> degrees;
+        std::set<PardalosNode, PardalosDegreeComparator> queue;
+
+        for (const auto& node: vertices_) {
+            degrees[node] = GetAdjacentVertices(node).size();
+            queue.emplace(node, degrees[node]);
+        }
+
+        while (!queue.empty()) {
+            const auto& iterator = queue.begin();
+            const auto& node = *iterator;
+            queue.erase(node);
+
+            result.emplace_back(node.id, node.degree);
+
+            for (const auto& neighbour: GetAdjacentVertices(node.id)) {
+                PardalosNode old_state(neighbour, degrees[neighbour]);
+                queue.erase(old_state);
+                degrees[neighbour] -= 1;
+                queue.emplace(neighbour, degrees[neighbour]);
+            }
+        }
+
+        return result;
+    }
+
     [[nodiscard]] inline bool HasEdge(int32_t from, int32_t to) const {
         const auto& adjacent_to_from_vertexes = adjacency_list_.at(from);
         const auto& adjacent_to_to_vertexes = adjacency_list_.at(to);
@@ -539,8 +612,6 @@ public:
 
     ~Graph() = default;
 };
-
-
 
 class TabooList {
 private:
@@ -915,10 +986,10 @@ namespace taboo_search {
 
 class MaxCliqueTabuSearch {
 private:
+    std::shared_ptr<graph::Graph> graph_;
     std::unordered_set<int32_t> best_clique_;
 
     void RemoveSaturationNodeFromQueue(
-            const graph::Graph& graph,
             const graph::SaturationNode& node,
             const std::unordered_map<int32_t, int32_t>& graph_coloring,
             std::set<graph::SaturationNode, graph::SaturationComparator>& queue,
@@ -931,7 +1002,7 @@ private:
         const auto& node_color = graph_coloring.at(node.id);
 
         // update neighbours
-        for (const auto& neighbour: graph.GetAdjacentVertices(node.id)) {
+        for (const auto& neighbour: graph_->GetAdjacentVertices(node.id)) {
             graph::SaturationNode old_neighbour_state(
                     static_cast<uint32_t>(neighbour) /* id */,
                     static_cast<uint32_t>(adjacent_colors[neighbour].size()) /* saturation */,
@@ -957,9 +1028,8 @@ private:
         }
     }
 
-    void RunInitialHeuristic(const graph::Graph& graph,
-                             graph::Clique& clique) {
-        const auto& colored_vertices = graph.SortByColor();
+    void RunInitialHeuristic(graph::Clique& clique) {
+        const auto& colored_vertices = graph_->SortByColor();
 
         std::unordered_map<int32_t, int32_t> graph_coloring;
 
@@ -972,10 +1042,10 @@ private:
         std::unordered_map<int32_t, uint32_t> degrees;
         std::unordered_map<int32_t, std::unordered_map<int32_t, uint32_t>> adjacent_colors;
 
-        for (const auto& node: graph.GetVertices()) {
-            degrees[node] = graph.GetDegree(node);
+        for (const auto& node: graph_->GetVertices()) {
+            degrees[node] = graph_->GetDegree(node);
 
-            for (const auto& neighbour: graph.GetAdjacentVertices(node)) {
+            for (const auto& neighbour: graph_->GetAdjacentVertices(node)) {
                 const auto& neighbour_color = graph_coloring[neighbour];
 
                 if (adjacent_colors[node].find(neighbour_color) == adjacent_colors[node].end()) {
@@ -988,7 +1058,7 @@ private:
 
         std::set<graph::SaturationNode, graph::SaturationComparator> queue;
 
-        for (const auto& node: graph.GetVertices()) {
+        for (const auto& node: graph_->GetVertices()) {
             queue.insert(graph::SaturationNode(static_cast<uint32_t>(node) /* id */,
                                                static_cast<uint32_t>(adjacent_colors[node].size()) /* saturation */,
                                                degrees[node] /* uncolored_neighborhood_degree */ ));
@@ -1001,10 +1071,10 @@ private:
 
             clique.AddToClique(node.id);
 
-            RemoveSaturationNodeFromQueue(graph, node, graph_coloring, queue, degrees, adjacent_colors);
+            RemoveSaturationNodeFromQueue(node, graph_coloring, queue, degrees, adjacent_colors);
 
-            for (const auto& candidate: graph.GetVertices()) {
-                if (graph.HasEdge(node.id, candidate)) {
+            for (const auto& candidate: graph_->GetVertices()) {
+                if (graph_->HasEdge(node.id, candidate)) {
                     continue;
                 }
 
@@ -1017,16 +1087,26 @@ private:
                     continue;
                 }
 
-                RemoveSaturationNodeFromQueue(graph, old_candidate_state, graph_coloring, queue, degrees, adjacent_colors);
+                RemoveSaturationNodeFromQueue(old_candidate_state, graph_coloring, queue, degrees, adjacent_colors);
             }
         }
     }
 
 public:
-    void RunSearch(const graph::Graph& graph) {
+    explicit MaxCliqueTabuSearch(std::shared_ptr<graph::Graph> graph):
+        graph_(graph) {
+        // empty on purpose
+    }
+
+    MaxCliqueTabuSearch(const MaxCliqueTabuSearch& that) = default;
+    MaxCliqueTabuSearch& operator=(const MaxCliqueTabuSearch& that) = default;
+    MaxCliqueTabuSearch(MaxCliqueTabuSearch&& that) = default;
+    MaxCliqueTabuSearch& operator=(MaxCliqueTabuSearch&& that) = default;
+
+    void RunSearch() {
         for (int iter = 0; iter < 300; ++iter) {
-            graph::Clique clique(graph);
-            RunInitialHeuristic(graph, clique);
+            graph::Clique clique(*graph_);
+            RunInitialHeuristic(clique);
 
             for (size_t swaps = 0; swaps < 400; swaps++) {
                 if (!clique.Move() && !clique.Swap1To1() && !clique.Swap1to2()) {
@@ -1048,6 +1128,8 @@ public:
     const std::unordered_set<int32_t>& GetClique() {
         return best_clique_;
     }
+
+    ~MaxCliqueTabuSearch() = default;
 };
 
 } // namespace taboo_search
@@ -1055,7 +1137,7 @@ public:
 class BnBSolver {
 public:
     void RunBnB() {
-        taboo_search::MaxCliqueTabuSearch st;
+        taboo_search::MaxCliqueTabuSearch st(graph_);
 //        st.ReadGraphFile(file);
 //        st.RunSearch();
         best_clique = st.GetClique();
@@ -1115,6 +1197,8 @@ private:
     }
 
 private:
+    std::shared_ptr<graph::Graph> graph_;
+
     vector <unordered_set<int>> neighbours;
     unordered_set<int> best_clique;
     unordered_set<int> clique;
@@ -1122,8 +1206,6 @@ private:
 };
 
 int main() {
-    ios_base::sync_with_stdio(false);
-    cin.tie(nullptr);
 //    vector <string> files = { /*"C125.9.clq",*/ "johnson8-2-4.clq", "johnson16-2-4.clq", "MANN_a9.clq", /*"MANN_a27.clq",
 //        "p_hat1000-1.clq",*/ "keller4.clq", "hamming8-4.clq", /*"brock200_1.clq",*/ "brock200_2.clq", "brock200_3.clq",
 //                                                "brock200_4.clq",
@@ -1146,12 +1228,18 @@ int main() {
                                        "sanr200_0.9.clq", "sanr400_0.7.clq"
     };
 
-    ofstream fout("clique_bnb.csv");
+    std::ofstream fout("clique_bnb.csv");
     fout << "File; Clique; Time (sec)\n";
-    for (string file: files) {
-        const auto& graph = graph::Graph::ReadGraphFile("data/" + file);
-        taboo_search::MaxCliqueTabuSearch problem;
-        problem.RunSearch(*graph);
+
+    std::cout << std::setfill(' ') << std::setw(20) << "Instance"
+              << std::setfill(' ') << std::setw(10) << "Clique"
+              << std::setfill(' ') << std::setw(15) << "Time, sec"
+              << std::endl;
+
+    for (const auto& file: files) {
+        std::shared_ptr<graph::Graph> graph = graph::Graph::ReadGraphFile("data/" + file);
+        taboo_search::MaxCliqueTabuSearch problem(graph);
+        problem.RunSearch();
 //        problem.ReadGraphFile("data/" + file);
 //        problem.ClearClique();
         clock_t start = clock();
@@ -1160,9 +1248,17 @@ int main() {
 //            cout << "*** WARNING: incorrect clique ***\n";
 //            fout << "*** WARNING: incorrect clique ***\n";
 //        }
+        clock_t end = clock();
+        clock_t ticks_diff = end - start;
+        double seconds_diff = RoundTo(double(ticks_diff) / CLOCKS_PER_SEC, 0.001);
+
         fout << file << "; " << problem.GetClique().size() << "; " << double(clock() - start) / CLOCKS_PER_SEC << '\n';
-        cout << file << ", result - " << problem.GetClique().size() << ", time - "
-             << double(clock() - start) / CLOCKS_PER_SEC << '\n';
+
+        std::cout << std::setfill(' ') << std::setw(20) << file
+                  << std::setfill(' ') << std::setw(10) << problem.GetClique().size()
+                  << std::setfill(' ') << std::setw(15) << seconds_diff
+                  << std::endl;
     }
+
     return 0;
 }
