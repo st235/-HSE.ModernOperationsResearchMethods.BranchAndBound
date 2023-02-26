@@ -6,6 +6,8 @@
 #include <vector>
 #include <sstream>
 #include <time.h>
+#include <memory>
+#include <iomanip>
 #include <iterator>
 #include <cstddef>
 #include <random>
