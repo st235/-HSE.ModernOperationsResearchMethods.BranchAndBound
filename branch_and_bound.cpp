@@ -1,21 +1,21 @@
+#include <algorithm>
 #include <cassert>
-#include <iostream>
+#include <cstddef>
 #include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <iterator>
+#include <memory>
+#include <queue>
+#include <random>
+#include <set>
+#include <sstream>
 #include <string>
+#include <time.h>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
-#include <sstream>
-#include <time.h>
-#include <memory>
-#include <iomanip>
-#include <iterator>
-#include <cstddef>
-#include <random>
-#include <queue>
-#include <unordered_set>
-#include <unordered_map>
-#include <set>
-#include <algorithm>
 
 namespace {
 
