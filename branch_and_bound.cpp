@@ -15,8 +15,6 @@
 #include <set>
 #include <algorithm>
 
-using namespace std;
-
 namespace {
 
 double RoundTo(double value, double precision = 1.0) {
@@ -1137,7 +1135,7 @@ public:
         BrandAndBoundRecursion(pardalos_weights, candidates, clique);
     }
 
-    const unordered_set<int32_t>& GetClique() {
+    const std::unordered_set<int32_t>& GetClique() {
         return best_clique_;
     }
 
@@ -1248,7 +1246,7 @@ int main() {
         double seconds_diff = RoundTo(double(ticks_diff) / CLOCKS_PER_SEC, 0.001);
 
         if (!graph::IsValidClique(*graph, best_clique)) {
-            cout << "*** WARNING: incorrect clique ***\n";
+            std::cout << "*** WARNING: incorrect clique ***\n";
             fout << "*** WARNING: incorrect clique ***\n";
         }
 
