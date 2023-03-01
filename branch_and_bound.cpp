@@ -396,14 +396,18 @@ public:
             adjacency_list_() {
         for (int32_t v = 0; v < vertices_count; v++) {
             vertices_.insert(v);
+            adjacency_list_[v] = {};
         }
     }
 
     explicit Graph(const std::unordered_set<int32_t>& vertices):
             vertices_(vertices.begin(), vertices.end()),
             adjacency_list_() {
-        // empty on purpose
+        for (const auto& vertex: vertices) {
+            adjacency_list_[vertex] = {};
+        }
     }
+
     Graph(const Graph& that) = default;
     Graph& operator=(const Graph& that) = default;
     Graph(Graph&& that) = default;
