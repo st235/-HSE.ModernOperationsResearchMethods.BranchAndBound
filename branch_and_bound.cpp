@@ -149,6 +149,94 @@ private:
     }
 
 public:
+    template<class V>
+    struct iterator
+    {
+        using iterator_category = std::forward_iterator_tag;
+        using difference_type   = std::ptrdiff_t;
+        using value_type        = V;
+        using pointer           = V*;
+        using reference         = V&;
+
+        explicit iterator(LinkedNode<V>* ptr) : ptr_(ptr) {
+            // empty on purpose
+        }
+
+        reference operator*() const {
+            return ptr_->item;
+        }
+
+        pointer operator->() {
+            return &ptr_->item;
+        }
+
+        iterator<T>& operator++() {
+            ptr_ = ptr_->next;
+            return *this;
+        }
+
+        iterator<T> operator++(int) {
+            iterator<T> tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        friend bool operator==(const iterator<T>& a, const iterator<T>& b) {
+            return a.ptr_ == b.ptr_;
+        }
+
+        friend bool operator!=(const iterator<T>& a, const iterator<T>& b) {
+            return a.ptr_ != b.ptr_;
+        }
+
+    private:
+        LinkedNode<V>* ptr_;
+    };
+
+    template<class V>
+    struct reverse_iterator
+    {
+        using iterator_category = std::forward_iterator_tag;
+        using difference_type   = std::ptrdiff_t;
+        using value_type        = V;
+        using pointer           = V*;
+        using reference         = V&;
+
+        explicit reverse_iterator(LinkedNode<V>* ptr): ptr_(ptr) {
+            // empty on purpose
+        }
+
+        reference operator*() const {
+            return ptr_->item;
+        }
+
+        pointer operator->() {
+            return &ptr_->item;
+        }
+
+        reverse_iterator<T>& operator++() {
+            ptr_ = ptr_->prev;
+            return *this;
+        }
+
+        reverse_iterator<T> operator++(int) {
+            reverse_iterator<T> tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        friend bool operator==(const reverse_iterator<T>& a, const reverse_iterator<T>& b) {
+            return a.ptr_ == b.ptr_;
+        }
+
+        friend bool operator!=(const reverse_iterator<T>& a, const reverse_iterator<T>& b) {
+            return a.ptr_ != b.ptr_;
+        }
+
+    private:
+        LinkedNode<V>* ptr_;
+    };
+
     explicit linked_unordered_set(size_t capacity):
             size_(0),
             capacity_(capacity),
@@ -262,6 +350,22 @@ public:
 
         head_ = nullptr;
         tail_ = nullptr;
+    }
+
+    [[nodiscard]] inline iterator<T> begin() const {
+        return iterator<T>(head_);
+    }
+
+    [[nodiscard]] inline iterator<T> end() const {
+        return iterator<T>(nullptr);
+    }
+
+    [[nodiscard]] inline reverse_iterator<T> rbegin() const {
+        return reverse_iterator<T>(tail_);
+    }
+
+    [[nodiscard]] inline reverse_iterator<T> rend() const {
+        return reverse_iterator<T>(nullptr);
     }
 
     [[nodiscard]] inline bool contains(const T& item) const {
@@ -1183,8 +1287,9 @@ public:
     ~MaxCliqueBranchAndBoundSearch() = default;
 
 private:
-    std::unordered_map<int32_t, int32_t> ColorFromBack(const graph::Graph& graph,
-                                                       std::vector<int32_t>& vertices) {
+    std::unordered_map<int32_t, int32_t> ComputeReverseColoring(
+            const graph::Graph& graph,
+            std::vector<int32_t>& vertices) {
         std::unordered_map<int32_t, int32_t> colors;
 
         for (const auto& vertex: vertices) {
@@ -1235,7 +1340,7 @@ private:
         }
 
         const auto& subgraph = graph_->MakeSubgraphFrom(vertices);
-        const auto& coloring = ColorFromBack(subgraph, vertices);
+        const auto& coloring = ComputeReverseColoring(subgraph, vertices);
 
         // id, color, pardalos_weight
         std::vector<std::tuple<int32_t, int32_t, int32_t>> sorted_vertices;
@@ -1247,7 +1352,8 @@ private:
         }
 
         std::sort(sorted_vertices.begin(), sorted_vertices.end(), [](
-                const std::tuple<int32_t, int32_t, int32_t>& one, const std::tuple<int32_t, int32_t, int32_t>& another) {
+                const std::tuple<int32_t, int32_t, int32_t>& one,
+                const std::tuple<int32_t, int32_t, int32_t>& another) {
             const auto& one_color = std::get<1>(one);
             const auto& one_pardalos = std::get<2>(one);
 
@@ -1263,22 +1369,14 @@ private:
             return one_color > another_color;
         });
 
-        int32_t max_color = std::get<1>(sorted_vertices[0]);
-
-        // Color is indexed from 0.
-        int32_t max_possible_clique = max_color + 1;
-
-        if (clique.size() + max_possible_clique <= best_clique_.size()) {
-            return;
-        }
-
         std::unordered_set<int32_t> discarded;
-        for (auto & sorted_vertex: sorted_vertices) {
+        for (const auto& sorted_vertex: sorted_vertices) {
             int32_t node_id = std::get<0>(sorted_vertex);
-
             int32_t color = std::get<1>(sorted_vertex);
 
-            if (clique.size() + color + 1 <= best_clique_.size()) {
+            // Colors are indexed from 0.
+            int32_t max_possible_clique = color + 1;
+            if (clique.size() + max_possible_clique <= best_clique_.size()) {
                 continue;
             }
 
@@ -1288,6 +1386,7 @@ private:
 
             clique.insert(node_id);
 
+            // Traverse vertices in Pardalos order.
             for (const auto& vertex: vertices) {
                 if (discarded.find(vertex) != discarded.end()) {
                     continue;
