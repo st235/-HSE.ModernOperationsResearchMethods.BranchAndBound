@@ -149,6 +149,103 @@ private:
     }
 
 public:
+    template<class V>
+    struct iterator
+    {
+        using iterator_category = std::forward_iterator_tag;
+        using difference_type   = std::ptrdiff_t;
+        using value_type        = V;
+        using pointer           = V*;
+        using reference         = V&;
+
+        explicit iterator(LinkedNode<V>* ptr) : ptr_(ptr) {
+            // empty on purpose
+        }
+
+        reference operator*() const {
+            return ptr_->item;
+        }
+
+        pointer operator->() {
+            return &ptr_->item;
+        }
+
+        iterator<T>& operator++() {
+            ptr_ = ptr_->next;
+            return *this;
+        }
+
+        iterator<T> operator++(int) {
+            iterator<T> tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        friend bool operator==(const iterator<T>& a, const iterator<T>& b) {
+            return a.ptr_ == b.ptr_;
+        }
+
+        friend bool operator!=(const iterator<T>& a, const iterator<T>& b) {
+            return a.ptr_ != b.ptr_;
+        }
+
+    private:
+        LinkedNode<V>* ptr_;
+    };
+
+    template<class V>
+    struct reverse_iterator
+    {
+        using iterator_category = std::forward_iterator_tag;
+        using difference_type   = std::ptrdiff_t;
+        using value_type        = V;
+        using pointer           = V*;
+        using reference         = V&;
+
+        explicit reverse_iterator(LinkedNode<V>* ptr): ptr_(ptr) {
+            // empty on purpose
+        }
+
+        reference operator*() const {
+            return ptr_->item;
+        }
+
+        pointer operator->() {
+            return &ptr_->item;
+        }
+
+        reverse_iterator<T>& operator++() {
+            ptr_ = ptr_->prev;
+            return *this;
+        }
+
+        reverse_iterator<T> operator++(int) {
+            reverse_iterator<T> tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        friend bool operator==(const reverse_iterator<T>& a, const reverse_iterator<T>& b) {
+            return a.ptr_ == b.ptr_;
+        }
+
+        friend bool operator!=(const reverse_iterator<T>& a, const reverse_iterator<T>& b) {
+            return a.ptr_ != b.ptr_;
+        }
+
+    private:
+        LinkedNode<V>* ptr_;
+    };
+
+    linked_unordered_set():
+            size_(0),
+            capacity_(std::numeric_limits<size_t>::max()),
+            lookup_(),
+            head_(nullptr),
+            tail_(nullptr) {
+        // empty on purpose
+    }
+
     explicit linked_unordered_set(size_t capacity):
             size_(0),
             capacity_(capacity),
@@ -262,6 +359,22 @@ public:
 
         head_ = nullptr;
         tail_ = nullptr;
+    }
+
+    [[nodiscard]] inline iterator<T> begin() const {
+        return iterator<T>(head_);
+    }
+
+    [[nodiscard]] inline iterator<T> end() const {
+        return iterator<T>(nullptr);
+    }
+
+    [[nodiscard]] inline reverse_iterator<T> rbegin() const {
+        return reverse_iterator<T>(tail_);
+    }
+
+    [[nodiscard]] inline reverse_iterator<T> rend() const {
+        return reverse_iterator<T>(nullptr);
     }
 
     [[nodiscard]] inline bool contains(const T& item) const {
@@ -447,14 +560,15 @@ public:
         adjacency_list_.erase(vertex);
     }
 
-    [[nodiscard]] Graph MakeSubgraphFrom(const std::unordered_set<int32_t>& vertices) const {
-        Graph sub_graph(vertices);
+    [[nodiscard]] Graph MakeSubgraphFrom(const std::vector<int32_t>& vertices) const {
+        std::unordered_set<int32_t> lookup(vertices.begin(), vertices.end());
+        Graph sub_graph(lookup);
 
         for (const auto& v: vertices) {
             const auto& neighbours = GetAdjacentVertices(v);
 
             for (const auto& n: neighbours) {
-                if (vertices.find(n) != vertices.end()) {
+                if (lookup.find(n) != lookup.end()) {
                     sub_graph.AddEdge(v, n);
                 }
             }
@@ -1163,9 +1277,19 @@ public:
         const auto& vertices = graph_->GetVertices();
 
         std::unordered_set<int32_t> clique;
-        std::unordered_set<int32_t> candidates(vertices.begin(), vertices.end());
+        std::vector<int32_t> sorted_vertices(vertices.begin(), vertices.end());
 
         const auto& pardalos_weights = graph_->GetVerticesPardalosWeights();
+
+        std::sort(sorted_vertices.begin(), sorted_vertices.end(),
+                  [&pardalos_weights](int32_t one, int32_t another) {
+            return pardalos_weights.at(one) < pardalos_weights.at(another);
+        });
+
+        std::linked_unordered_set<int32_t> candidates;
+        for (const auto& vertex: sorted_vertices) {
+            candidates.insert(vertex);
+        }
 
         BrandAndBoundRecursion(pardalos_weights, candidates, clique);
     }
@@ -1177,9 +1301,49 @@ public:
     ~MaxCliqueBranchAndBoundSearch() = default;
 
 private:
+    std::unordered_map<int32_t, int32_t> ComputeReverseColoring(
+            std::linked_unordered_set<int32_t>& vertices) {
+        std::unordered_map<int32_t, int32_t> colors;
+
+        for (const auto& vertex: vertices) {
+            colors[vertex] = -1;
+        }
+
+        // Traverse colors in reverse order.
+        for (auto i = vertices.rbegin(); i != vertices.rend(); i++) {
+            const auto& vertex = *i;
+
+            std::unordered_set<int32_t> neighbour_colors;
+
+            for (const auto& neighbour: graph_->GetAdjacentVertices(vertex)) {
+                if (!vertices.contains(neighbour)) {
+                    continue;
+                }
+
+                if (colors[neighbour] != -1) {
+                    neighbour_colors.insert(colors[neighbour]);
+                }
+            }
+
+            int vertex_color = -1;
+
+            for (int32_t c = 0; c <= vertices.size(); c++) {
+                if (neighbour_colors.find(c) == neighbour_colors.end()) {
+                    vertex_color = c;
+                    break;
+                }
+            }
+
+            assert(vertex_color != -1);
+            colors[vertex] = vertex_color;
+        }
+
+        return colors;
+    }
+
     void BrandAndBoundRecursion(
             const std::unordered_map<int32_t, int32_t>& pardalos_weights,
-            std::unordered_set<int32_t>& vertices,
+            std::linked_unordered_set<int32_t>& vertices,
             std::unordered_set<int32_t>& clique) {
         if (vertices.empty()) {
             if (clique.size() > best_clique_.size()) {
@@ -1193,41 +1357,54 @@ private:
             return;
         }
 
-        const auto& subgraph = graph_->MakeSubgraphFrom(vertices);
-        const auto& coloring = subgraph.GetVerticesColoring();
+        const auto& coloring = ComputeReverseColoring(vertices);
 
         // id, color, pardalos_weight
         std::vector<std::tuple<int32_t, int32_t, int32_t>> sorted_vertices;
         for (const auto& coloring_entry: coloring) {
             const auto& node = coloring_entry.first;
-            sorted_vertices.emplace_back(
-                    node, coloring_entry.second, pardalos_weights.at(node));
+            const auto& color = coloring_entry.second;
+
+            sorted_vertices.emplace_back(node, color, pardalos_weights.at(node));
         }
 
         std::sort(sorted_vertices.begin(), sorted_vertices.end(), [](
-                const std::tuple<int32_t, int32_t, int32_t>& one, const std::tuple<int32_t, int32_t, int32_t>& another) {
-           return std::tie(std::get<1>(one), std::get<2>(one))
-                > std::tie(std::get<1>(another), std::get<2>(another));
+                const std::tuple<int32_t, int32_t, int32_t>& one,
+                const std::tuple<int32_t, int32_t, int32_t>& another) {
+            const auto& one_color = std::get<1>(one);
+            const auto& one_pardalos = std::get<2>(one);
+
+            const auto& another_color = std::get<1>(another);
+            const auto& another_pardalos = std::get<2>(another);
+
+            if (one_color == another_color) {
+                // Sort by pardalos: smallest degree first.
+                return one_pardalos < another_pardalos;
+            }
+
+            // Sort by colors: bigger color first.
+            return one_color > another_color;
         });
 
-        int32_t max_color = std::get<1>(sorted_vertices[0]);
-        // Color is indexed from 0.
-        int32_t max_possible_clique = max_color + 1;
+        for (const auto& sorted_vertex: sorted_vertices) {
+            int32_t node_id = std::get<0>(sorted_vertex);
+            int32_t color = std::get<1>(sorted_vertex);
 
-        if (clique.size() + max_possible_clique <= best_clique_.size()) {
-            return;
-        }
+            // Colors are indexed from 0.
+            int32_t max_possible_clique = color + 1;
+            if (clique.size() + max_possible_clique <= best_clique_.size()) {
+                continue;
+            }
 
-        for (const auto& next_clique_vertex: sorted_vertices) {
-            int32_t node_id = std::get<0>(next_clique_vertex);
+            vertices.remove(node_id);
 
-            std::unordered_set<int32_t> new_vertices;
+            std::linked_unordered_set<int32_t> new_vertices;
 
-            vertices.erase(node_id);
             clique.insert(node_id);
 
+            // Traverse vertices in Pardalos order.
             for (const auto& vertex: vertices) {
-                if (subgraph.HasEdge(node_id, vertex)) {
+                if (graph_->HasEdge(node_id, vertex)) {
                     new_vertices.insert(vertex);
                 }
             }
