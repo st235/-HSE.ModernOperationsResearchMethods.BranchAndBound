@@ -237,6 +237,15 @@ public:
         LinkedNode<V>* ptr_;
     };
 
+    linked_unordered_set():
+            size_(0),
+            capacity_(std::numeric_limits<size_t>::max()),
+            lookup_(),
+            head_(nullptr),
+            tail_(nullptr) {
+        // empty on purpose
+    }
+
     explicit linked_unordered_set(size_t capacity):
             size_(0),
             capacity_(capacity),
@@ -1268,14 +1277,19 @@ public:
         const auto& vertices = graph_->GetVertices();
 
         std::unordered_set<int32_t> clique;
-        std::vector<int32_t> candidates(vertices.begin(), vertices.end());
+        std::vector<int32_t> sorted_vertices(vertices.begin(), vertices.end());
 
         const auto& pardalos_weights = graph_->GetVerticesPardalosWeights();
 
-        std::sort(candidates.begin(), candidates.end(),
+        std::sort(sorted_vertices.begin(), sorted_vertices.end(),
                   [&pardalos_weights](int32_t one, int32_t another) {
             return pardalos_weights.at(one) < pardalos_weights.at(another);
         });
+
+        std::linked_unordered_set<int32_t> candidates;
+        for (const auto& vertex: sorted_vertices) {
+            candidates.insert(vertex);
+        }
 
         BrandAndBoundRecursion(pardalos_weights, candidates, clique);
     }
@@ -1288,20 +1302,24 @@ public:
 
 private:
     std::unordered_map<int32_t, int32_t> ComputeReverseColoring(
-            const graph::Graph& graph,
-            std::vector<int32_t>& vertices) {
+            std::linked_unordered_set<int32_t>& vertices) {
         std::unordered_map<int32_t, int32_t> colors;
 
         for (const auto& vertex: vertices) {
             colors[vertex] = -1;
         }
 
-        for (int32_t i = vertices.size() - 1; i >= 0; i--) {
-            auto vertex = vertices[i];
+        // Traverse colors in reverse order.
+        for (auto i = vertices.rbegin(); i != vertices.rend(); i++) {
+            const auto& vertex = *i;
 
             std::unordered_set<int32_t> neighbour_colors;
 
-            for (const auto& neighbour: graph.GetAdjacentVertices(vertex)) {
+            for (const auto& neighbour: graph_->GetAdjacentVertices(vertex)) {
+                if (!vertices.contains(neighbour)) {
+                    continue;
+                }
+
                 if (colors[neighbour] != -1) {
                     neighbour_colors.insert(colors[neighbour]);
                 }
@@ -1309,7 +1327,7 @@ private:
 
             int vertex_color = -1;
 
-            for (int32_t c = 0; c <= graph.GetDegree(vertex); c++) {
+            for (int32_t c = 0; c <= vertices.size(); c++) {
                 if (neighbour_colors.find(c) == neighbour_colors.end()) {
                     vertex_color = c;
                     break;
@@ -1325,7 +1343,7 @@ private:
 
     void BrandAndBoundRecursion(
             const std::unordered_map<int32_t, int32_t>& pardalos_weights,
-            std::vector<int32_t>& vertices,
+            std::linked_unordered_set<int32_t>& vertices,
             std::unordered_set<int32_t>& clique) {
         if (vertices.empty()) {
             if (clique.size() > best_clique_.size()) {
@@ -1339,8 +1357,7 @@ private:
             return;
         }
 
-        const auto& subgraph = graph_->MakeSubgraphFrom(vertices);
-        const auto& coloring = ComputeReverseColoring(subgraph, vertices);
+        const auto& coloring = ComputeReverseColoring(vertices);
 
         // id, color, pardalos_weight
         std::vector<std::tuple<int32_t, int32_t, int32_t>> sorted_vertices;
@@ -1369,7 +1386,6 @@ private:
             return one_color > another_color;
         });
 
-        std::unordered_set<int32_t> discarded;
         for (const auto& sorted_vertex: sorted_vertices) {
             int32_t node_id = std::get<0>(sorted_vertex);
             int32_t color = std::get<1>(sorted_vertex);
@@ -1380,19 +1396,16 @@ private:
                 continue;
             }
 
-            discarded.insert(node_id);
+            vertices.remove(node_id);
 
-            std::vector<int32_t> new_vertices;
+            std::linked_unordered_set<int32_t> new_vertices;
 
             clique.insert(node_id);
 
             // Traverse vertices in Pardalos order.
             for (const auto& vertex: vertices) {
-                if (discarded.find(vertex) != discarded.end()) {
-                    continue;
-                }
-                if (subgraph.HasEdge(node_id, vertex)) {
-                    new_vertices.emplace_back(vertex);
+                if (graph_->HasEdge(node_id, vertex)) {
+                    new_vertices.insert(vertex);
                 }
             }
 
